@@ -1,4 +1,4 @@
-import { ASSET_CODE, ASSET_ISSUER } from "./index";
+import { ASSET_CODE, ASSET_ISSUER } from "./index.js";
 
 export default async function finalize({
   amountString,

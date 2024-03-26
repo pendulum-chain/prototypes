@@ -1,7 +1,7 @@
 import prompts from "prompts";
 import { Keypair, Transaction, TransactionBuilder, Horizon, Networks, Operation, Asset, Memo } from "stellar-sdk";
 import open from "open";
-import finalize from "./finalize";
+import finalize from "./finalize.js";
 
 const TOML_FILE_URL = "https://mykobo.co/.well-known/stellar.toml";
 export const ASSET_CODE = "EURC";
