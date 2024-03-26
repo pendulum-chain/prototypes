@@ -1,24 +1,24 @@
 import prompts from "prompts";
 import { Keypair, Transaction, TransactionBuilder, Horizon, Networks, Operation, Asset, Memo } from "stellar-sdk";
 import open from "open";
+
 import finalize from "./finalize.js";
 
 const TOML_FILE_URL = "https://mykobo.co/.well-known/stellar.toml";
 export const ASSET_CODE = "EURC";
 export const ASSET_ISSUER = "GAQRF3UGHBT6JYQZ7YSUYCIYWAF4T2SAA5237Q5LIQYJOHHFAWDXZ7NM";
-export const EURC_VAULT_ACCOUNT_ID = "6bsD97dS8ZyomMmp1DLCnCtx25oABtf19dypQKdZe6FBQXSm"
-export const ASSET_ISSUER_RAW = "0x2112ee863867e4e219fe254c0918b00bc9ea400775bfc3ab4430971ce505877c";
+export const EURC_VAULT_ACCOUNT_ID = "6bsD97dS8ZyomMmp1DLCnCtx25oABtf19dypQKdZe6FBQXSm";
 const NETWORK_PASSPHRASE = Networks.PUBLIC;
 const HORIZON_URL = "https://horizon.stellar.org";
 const BASE_FEE = "10000";
 
+export const ASSET_ISSUER_RAW = `0x${Keypair.fromPublicKey(ASSET_ISSUER).rawPublicKey().toString("hex")}`;
+
 async function getConfig() {
-  const stellarFundingSecret = process.env.STELLAR_FUNDING_SECRET;
-  if (!stellarFundingSecret) {
-    throw new Error(
-      "No STELLAR_FUNDING_SECRET environment variable found. Please set it to the secret seed of the Stellar account that will fund the ephemeral account."
-    );
-  }
+  const stellarFundingSecret = await prompts.prompts.password({
+    type: "password",
+    message: `Enter the secret key of the Stellar account that will fund the temporary account.`,
+  });
 
   const pendulumSecret = await prompts.prompts.password({
     type: "password",
@@ -76,11 +76,14 @@ async function main() {
   await finalize({
     amountString: sep24Result.amount,
     ephemeralAccountId,
+    fundingSecret: config.stellarFundingSecret,
     horizonServer,
     offrampingTransaction,
     mergeAccountTransaction,
     pendulumSecret: config.pendulumSecret,
   });
+
+  process.exit();
 }
 
 async function sep10(ephemeralKeys, signingKey, webAuthEndpoint) {
@@ -189,6 +192,8 @@ async function setupStellarAccount(fundingSecret, ephemeralKeys, horizonServer) 
 
   const ephemeralAccountId = ephemeralKeys.publicKey();
 
+  // add a setOption oeration in order to make this a 2-of-2 multisig account where the
+  // funding account is a cosigner
   const createAccountTransaction = new TransactionBuilder(fundingAccount, {
     fee: BASE_FEE,
     networkPassphrase: NETWORK_PASSPHRASE,
@@ -196,7 +201,13 @@ async function setupStellarAccount(fundingSecret, ephemeralKeys, horizonServer) 
     .addOperation(
       Operation.createAccount({
         destination: ephemeralAccountId,
-        startingBalance: "2",
+        startingBalance: "2.5",
+      }),
+      Operation.setOptions({
+        signer: { ed25519PublicKey: fundingAccountId, weight: 1 },
+        lowThreshold: 2,
+        medThreshold: 2,
+        highThreshold: 2,
       })
     )
     .setTimeout(30)
@@ -222,6 +233,8 @@ async function setupStellarAccount(fundingSecret, ephemeralKeys, horizonServer) 
 }
 
 async function createOfframpTransaction(sep24Result, ephemeralAccount, ephemeralKeys) {
+  // this operation would run completely in the browser
+  // that is where the signature of the ephemeral account is added
   const { amount, memo, offrampingAccount } = sep24Result;
   const transaction = new TransactionBuilder(ephemeralAccount, {
     fee: BASE_FEE,
@@ -235,7 +248,7 @@ async function createOfframpTransaction(sep24Result, ephemeralAccount, ephemeral
       })
     )
     .addMemo(Memo.text(memo))
-    .setTimeout(30)
+    .setTimeout(7 * 24 * 3600)
     .build();
   transaction.sign(ephemeralKeys);
 
@@ -243,6 +256,8 @@ async function createOfframpTransaction(sep24Result, ephemeralAccount, ephemeral
 }
 
 async function createAccountMergeTransaction(fundingSecret, ephemeralAccount, ephemeralKeys) {
+  // this operation would run completely in the browser
+  // that is where the signature of the ephemeral account is added
   const transaction = new TransactionBuilder(ephemeralAccount, {
     fee: BASE_FEE,
     networkPassphrase: NETWORK_PASSPHRASE,
@@ -258,7 +273,7 @@ async function createAccountMergeTransaction(fundingSecret, ephemeralAccount, ep
         destination: Keypair.fromSecret(fundingSecret).publicKey(),
       })
     )
-    .setTimeout(30)
+    .setTimeout(7 * 24 * 3600)
     .build();
   transaction.sign(ephemeralKeys);
 
