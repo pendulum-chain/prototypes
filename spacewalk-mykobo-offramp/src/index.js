@@ -6,6 +6,8 @@ import finalize from "./finalize.js";
 const TOML_FILE_URL = "https://mykobo.co/.well-known/stellar.toml";
 export const ASSET_CODE = "EURC";
 export const ASSET_ISSUER = "GAQRF3UGHBT6JYQZ7YSUYCIYWAF4T2SAA5237Q5LIQYJOHHFAWDXZ7NM";
+export const EURC_VAULT_ACCOUNT_ID = "6bsD97dS8ZyomMmp1DLCnCtx25oABtf19dypQKdZe6FBQXSm"
+export const ASSET_ISSUER_RAW = "0x2112ee863867e4e219fe254c0918b00bc9ea400775bfc3ab4430971ce505877c";
 const NETWORK_PASSPHRASE = Networks.PUBLIC;
 const HORIZON_URL = "https://horizon.stellar.org";
 const BASE_FEE = "10000";
@@ -64,7 +66,7 @@ async function main() {
 
   const ephemeralAccountId = ephemeralKeys.publicKey();
   const ephemeralAccount = await horizonServer.loadAccount(ephemeralAccountId);
-  const offrampinTransaction = await createOfframpTransaction(sep24Result, ephemeralAccount, ephemeralKeys);
+  const offrampingTransaction = await createOfframpTransaction(sep24Result, ephemeralAccount, ephemeralKeys);
   const mergeAccountTransaction = await createAccountMergeTransaction(
     config.stellarFundingSecret,
     ephemeralAccount,
@@ -75,7 +77,7 @@ async function main() {
     amountString: sep24Result.amount,
     ephemeralAccountId,
     horizonServer,
-    offrampinTransaction,
+    offrampingTransaction,
     mergeAccountTransaction,
     pendulumSecret: config.pendulumSecret,
   });
@@ -225,7 +227,6 @@ async function createOfframpTransaction(sep24Result, ephemeralAccount, ephemeral
     fee: BASE_FEE,
     networkPassphrase: NETWORK_PASSPHRASE,
   })
-
     .addOperation(
       Operation.payment({
         amount,
