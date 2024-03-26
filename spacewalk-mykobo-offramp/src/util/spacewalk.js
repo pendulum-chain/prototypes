@@ -1,6 +1,7 @@
 import {Keyring} from "@polkadot/api";
 import {Asset} from "stellar-sdk";
 import {stellarHexToPublic} from "./convert.js";
+import {parseEventRedeemRequest} from "./event-parsers.js";
 
 export function extractAssetFromWrapped(wrapped,) {
     if (wrapped.Stellar === "StellarNative") {
@@ -99,7 +100,7 @@ export class VaultService {
                             });
 
                         if (event.length == 0) {
-                            reject(new MissingInBlockEventError("No redeem event found", "Redeem Request Event",),);
+                            reject(new Error(`No redeem event found for account ${origin.address}`),);
                         }
                         //we should only find one event corresponding to the issue request
                         if (event.length != 1) {
@@ -109,32 +110,32 @@ export class VaultService {
                     }
                 })
                 .catch((error) => {
-                    reject(new RpcError(error.message, "Redeem Request", origin.address));
+                    reject(new Error(`Failed to request redeem: ${error}`));
                 })
                 .finally(() => release());
         });
     }
 
-// We first check if dispatchError is of type "module",
-// If not we either return ExtrinsicFailedError or Unknown dispatch error
+    // We first check if dispatchError is of type "module",
+    // If not we either return ExtrinsicFailedError or Unknown dispatch error
     handleDispatchError(dispatchError, systemExtrinsicFailedEvent, extrinsicCalled) {
         if (dispatchError?.isModule) {
             const decoded = this.api.api.registry.findMetaError(dispatchError.asModule);
             const {docs, name, section, method} = decoded;
 
-            return new Error("Dispatch Error", method, section, extrinsicCalled);
+            return new Error(`Dispatch error: ${section}.${method}:: ${name}`);
         } else if (systemExtrinsicFailedEvent) {
             const eventName = systemExtrinsicFailedEvent?.event.data && systemExtrinsicFailedEvent?.event.data.length > 0 ? systemExtrinsicFailedEvent?.event.data[0].toString() : "Unknown";
 
             const {
                 phase, event: {data, method, section}
             } = systemExtrinsicFailedEvent;
-            console.log(`Extrinsic failed: ${phase}: ${section}.${method}:: ${data}`);
+            console.log(`Extrinsic failed in phase ${phase.toString()} with ${section}.${method}:: ${eventName}`);
 
-            return new ExtrinsicFailedError("Extrinsic failed", eventName);
+            return new Error(`Failed to dispatch ${extrinsicCalled}`);
         } else {
             console.log("Encountered some other error: ", dispatchError?.toString(), JSON.stringify(dispatchError),);
-            return new Error("Unknown Dispatch Error", "Unknown", "Unknown", extrinsicCalled);
+            return new Error(`Unknown error during ${extrinsicCalled}`);
         }
     }
 }

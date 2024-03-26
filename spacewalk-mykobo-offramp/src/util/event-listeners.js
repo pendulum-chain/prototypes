@@ -1,6 +1,6 @@
 import {
     parseEventRedeemExecution,
-} from "./event_parsers.js";
+} from "./event-parsers.js";
 
 export class EventListener {
     static eventListeners = new Map();
@@ -8,7 +8,10 @@ export class EventListener {
     pendingIssueEvents = [];
     pendingRedeemEvents = [];
 
+    api = undefined;
+
     constructor(api) {
+        this.api = api;
         this.initEventSubscriber();
     }
 
