@@ -10,8 +10,9 @@ export const ASSET_ISSUER = "GAQRF3UGHBT6JYQZ7YSUYCIYWAF4T2SAA5237Q5LIQYJOHHFAWD
 export const EURC_VAULT_ACCOUNT_ID = "6bsD97dS8ZyomMmp1DLCnCtx25oABtf19dypQKdZe6FBQXSm";
 const NETWORK_PASSPHRASE = Networks.PUBLIC;
 const HORIZON_URL = "https://horizon.stellar.org";
-const BASE_FEE = "10000";
+const BASE_FEE = "1000000";
 
+// 0x2112ee863867e4e219fe254c0918b00bc9ea400775bfc3ab4430971ce505877c
 export const ASSET_ISSUER_RAW = `0x${Keypair.fromPublicKey(ASSET_ISSUER).rawPublicKey().toString("hex")}`;
 
 async function getConfig() {
@@ -202,8 +203,11 @@ async function setupStellarAccount(fundingSecret, ephemeralKeys, horizonServer) 
       Operation.createAccount({
         destination: ephemeralAccountId,
         startingBalance: "2.5",
-      }),
+      })
+    )
+    .addOperation(
       Operation.setOptions({
+        source: ephemeralAccountId,
         signer: { ed25519PublicKey: fundingAccountId, weight: 1 },
         lowThreshold: 2,
         medThreshold: 2,
@@ -212,8 +216,16 @@ async function setupStellarAccount(fundingSecret, ephemeralKeys, horizonServer) 
     )
     .setTimeout(30)
     .build();
+
   createAccountTransaction.sign(fundingAccountKeypair);
-  await horizonServer.submitTransaction(createAccountTransaction);
+  createAccountTransaction.sign(ephemeralKeys);
+
+  try {
+    await horizonServer.submitTransaction(createAccountTransaction);
+  } catch (error) {
+    console.error("Could not submit the offramping transaction");
+    console.error(error.response.data.extras);
+  }
 
   const ephemeralAccount = await horizonServer.loadAccount(ephemeralAccountId);
   const changeTrustTransaction = new TransactionBuilder(ephemeralAccount, {
@@ -229,7 +241,13 @@ async function setupStellarAccount(fundingSecret, ephemeralKeys, horizonServer) 
     .build();
 
   changeTrustTransaction.sign(ephemeralKeys);
-  await horizonServer.submitTransaction(changeTrustTransaction);
+  changeTrustTransaction.sign(fundingAccountKeypair);
+  try {
+    await horizonServer.submitTransaction(changeTrustTransaction);
+  } catch (error) {
+    console.error("Could not submit the change trust transaction");
+    console.error(error.response.data.extras);
+  }
 }
 
 async function createOfframpTransaction(sep24Result, ephemeralAccount, ephemeralKeys) {
