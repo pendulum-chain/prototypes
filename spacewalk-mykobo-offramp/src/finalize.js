@@ -1,6 +1,5 @@
 import { Keypair } from "stellar-sdk";
 
-import { ASSET_CODE, ASSET_ISSUER_RAW, EURC_VAULT_ACCOUNT_ID } from "./index.js";
 import { ApiManager } from "./util/polkadot-api.js";
 import { prettyPrintVaultId, VaultService } from "./util/spacewalk.js";
 import { decimalToStellarNative } from "./util/convert.js";
@@ -14,8 +13,9 @@ export default async function finalize({
   offrampingTransaction,
   mergeAccountTransaction,
   pendulumSecret,
+  tokenConfig,
 }) {
-  await executeSpacewalkRedeem(ephemeralAccountId, amountString, pendulumSecret);
+  await executeSpacewalkRedeem(ephemeralAccountId, amountString, pendulumSecret, tokenConfig);
 
   // the following operations would happen on the backend
   // that is where the funding keypair signs the transactions
@@ -48,16 +48,17 @@ export default async function finalize({
 // this amount must be ultimately transferred to the stellarTargetAccountId.
 // When this function returns the Stellar redeem transaction must already be completed so that
 // the assets are already on the stellarTargetAccountId.
-export async function executeSpacewalkRedeem(stellarTargetAccountId, amountString, pendulumSecret) {
+async function executeSpacewalkRedeem(stellarTargetAccountId, amountString, pendulumSecret, tokenConfig) {
   console.log("Executing Spacewalk redeem");
+  const assetIssuerRaw = `0x${Keypair.fromPublicKey(tokenConfig.assetIssuer).rawPublicKey().toString("hex")}`;
 
   const pendulumApi = await new ApiManager().getApi();
   // The Vault ID of the EURC vault
   let eurcVaultId = {
-    accountId: EURC_VAULT_ACCOUNT_ID,
+    accountId: tokenConfig.vaultAccountId,
     currencies: {
       collateral: { XCM: 0 },
-      wrapped: { Stellar: { AlphaNum4: { code: ASSET_CODE, issuer: ASSET_ISSUER_RAW } } },
+      wrapped: { Stellar: { AlphaNum4: { code: tokenConfig.assetCode.padEnd(4, "\0"), issuer: assetIssuerRaw } } },
     },
   };
   let vaultService = new VaultService(eurcVaultId, pendulumApi);

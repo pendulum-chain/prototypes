@@ -4,18 +4,38 @@ import open from "open";
 
 import finalize from "./finalize.js";
 
-const TOML_FILE_URL = "https://mykobo.co/.well-known/stellar.toml";
-export const ASSET_CODE = "EURC";
-export const ASSET_ISSUER = "GAQRF3UGHBT6JYQZ7YSUYCIYWAF4T2SAA5237Q5LIQYJOHHFAWDXZ7NM";
-export const EURC_VAULT_ACCOUNT_ID = "6bsD97dS8ZyomMmp1DLCnCtx25oABtf19dypQKdZe6FBQXSm";
 const NETWORK_PASSPHRASE = Networks.PUBLIC;
 const HORIZON_URL = "https://horizon.stellar.org";
 const BASE_FEE = "1000000";
 
-// 0x2112ee863867e4e219fe254c0918b00bc9ea400775bfc3ab4430971ce505877c
-export const ASSET_ISSUER_RAW = `0x${Keypair.fromPublicKey(ASSET_ISSUER).rawPublicKey().toString("hex")}`;
+const TOKEN_CONFIG = {
+  brl: {
+    tomlFileUrl: "https://ntokens.com/.well-known/stellar.toml",
+    assetCode: "BRL",
+    assetIssuer: "GDVKY2GU2DRXWTBEYJJWSFXIGBZV6AZNBVVSUHEPZI54LIS6BA7DVVSP",
+    vaultAccountId: "6g7fKQQZ9VfbBTQSaKBcATV4psApFra5EDwKLARFZCCVnSWS",
+  },
+  eurc: {
+    tomlFileUrl: "https://mykobo.co/.well-known/stellar.toml",
+    assetCode: "EURC",
+    assetIssuer: "GAQRF3UGHBT6JYQZ7YSUYCIYWAF4T2SAA5237Q5LIQYJOHHFAWDXZ7NM",
+    vaultAccountId: "6bsD97dS8ZyomMmp1DLCnCtx25oABtf19dypQKdZe6FBQXSm",
+  },
+};
 
 async function getConfig() {
+  const token = process.argv[2];
+  const tokenConfig = TOKEN_CONFIG[token];
+  if (tokenConfig === undefined) {
+    console.error(
+      "ERROR: Please specify either one of the following tokens as an argument:",
+      Object.keys(TOKEN_CONFIG)
+        .map((token) => `"${token}"`)
+        .join(", ")
+    );
+    process.exit(1);
+  }
+
   const stellarFundingSecret = await prompts.prompts.password({
     type: "password",
     message: `Enter the secret key of the Stellar account that will fund the temporary account.`,
@@ -29,14 +49,16 @@ async function getConfig() {
   return {
     pendulumSecret,
     stellarFundingSecret,
+    tokenConfig,
   };
 }
 
 async function main() {
   const config = await getConfig();
+  const { tokenConfig } = config;
 
   console.log("Fetch anchor information");
-  const tomlFile = await fetch(TOML_FILE_URL);
+  const tomlFile = await fetch(tokenConfig.tomlFileUrl);
   if (tomlFile.status !== 200) {
     throw new Error(`Failed to fetch TOML file: ${tomlFile.statusText}`);
   }
@@ -44,7 +66,7 @@ async function main() {
   const tomlFileContent = (await tomlFile.text()).split("\n");
   const findValueInToml = (key) => {
     for (const line of tomlFileContent) {
-      const regexp = new RegExp(`^\s*${key}\s*=\s*"(.*)"\s*$`);
+      const regexp = new RegExp(`^\\s*${key}\\s*=\\s*"(.*)"\\s*$`);
       if (regexp.test(line)) {
         return regexp.exec(line)[1];
       }
@@ -59,19 +81,25 @@ async function main() {
   console.log(`Ephemeral secret: ${ephemeralKeys.secret()}`);
 
   const sep10Token = await sep10(ephemeralKeys, signingKey, webAuthEndpoint);
-  const sep24Result = await sep24(sep10Token, sep24Url);
+  const sep24Result = await sep24(sep10Token, sep24Url, tokenConfig);
   console.log(`SEP-24 completed. Offramp details: ${JSON.stringify(sep24Result)}`);
 
   const horizonServer = new Horizon.Server(HORIZON_URL);
-  await setupStellarAccount(config.stellarFundingSecret, ephemeralKeys, horizonServer);
+  await setupStellarAccount(config.stellarFundingSecret, ephemeralKeys, horizonServer, tokenConfig);
 
   const ephemeralAccountId = ephemeralKeys.publicKey();
   const ephemeralAccount = await horizonServer.loadAccount(ephemeralAccountId);
-  const offrampingTransaction = await createOfframpTransaction(sep24Result, ephemeralAccount, ephemeralKeys);
+  const offrampingTransaction = await createOfframpTransaction(
+    sep24Result,
+    ephemeralAccount,
+    ephemeralKeys,
+    tokenConfig
+  );
   const mergeAccountTransaction = await createAccountMergeTransaction(
     config.stellarFundingSecret,
     ephemeralAccount,
-    ephemeralKeys
+    ephemeralKeys,
+    tokenConfig
   );
 
   await finalize({
@@ -82,6 +110,7 @@ async function main() {
     offrampingTransaction,
     mergeAccountTransaction,
     pendulumSecret: config.pendulumSecret,
+    tokenConfig,
   });
 
   process.exit();
@@ -131,20 +160,25 @@ async function sep10(ephemeralKeys, signingKey, webAuthEndpoint) {
   return token;
 }
 
-async function sep24(token, sep24Url) {
+async function sep24(token, sep24Url, tokenConfig) {
   console.log("Initiate SEP-24");
 
   const sep24Params = new URLSearchParams({
-    asset_code: ASSET_CODE,
+    asset_code: tokenConfig.assetCode,
   });
 
-  const sep24Response = await fetch(`${sep24Url}/transactions/withdraw/interactive`, {
+  const fetchUrl = `${sep24Url}/transactions/withdraw/interactive`;
+  const parameters = {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Bearer ${token}` },
     body: sep24Params.toString(),
-  });
+  };
+
+  const sep24Response = await fetch(fetchUrl, parameters);
   if (sep24Response.status !== 200) {
-    throw new Error(`Failed to initiate SEP-24: ${sep24Response.statusText}`);
+    throw new Error(
+      `Failed to initiate SEP-24: ${sep24Response.statusText}, ${fetchUrl}, ${JSON.stringify(parameters)}`
+    );
   }
 
   const { type, url, id } = await sep24Response.json();
@@ -172,19 +206,16 @@ async function sep24(token, sep24Url) {
     status = transaction;
   } while (status.status !== "pending_user_transfer_start");
 
-  if (status.withdraw_memo_type !== "text") {
-    throw new Error(`Unexpected offramp memo type: ${transaction.withdraw_memo_type}`);
-  }
-
   console.log("SEP-24 parameters received");
   return {
     amount: status.amount_in,
     memo: status.withdraw_memo,
+    memoType: status.withdraw_memo_type,
     offrampingAccount: status.withdraw_anchor_account,
   };
 }
 
-async function setupStellarAccount(fundingSecret, ephemeralKeys, horizonServer) {
+async function setupStellarAccount(fundingSecret, ephemeralKeys, horizonServer, tokenConfig) {
   console.log("Setup Stellar ephemeral account");
 
   const fundingAccountKeypair = Keypair.fromSecret(fundingSecret);
@@ -223,7 +254,7 @@ async function setupStellarAccount(fundingSecret, ephemeralKeys, horizonServer) 
   try {
     await horizonServer.submitTransaction(createAccountTransaction);
   } catch (error) {
-    console.error("Could not submit the offramping transaction");
+    console.error("Could not submit the create account transaction");
     console.error(error.response.data.extras);
   }
 
@@ -234,7 +265,7 @@ async function setupStellarAccount(fundingSecret, ephemeralKeys, horizonServer) 
   })
     .addOperation(
       Operation.changeTrust({
-        asset: new Asset(ASSET_CODE, ASSET_ISSUER),
+        asset: new Asset(tokenConfig.assetCode, tokenConfig.assetIssuer),
       })
     )
     .setTimeout(30)
@@ -250,10 +281,25 @@ async function setupStellarAccount(fundingSecret, ephemeralKeys, horizonServer) 
   }
 }
 
-async function createOfframpTransaction(sep24Result, ephemeralAccount, ephemeralKeys) {
+async function createOfframpTransaction(sep24Result, ephemeralAccount, ephemeralKeys, tokenConfig) {
   // this operation would run completely in the browser
   // that is where the signature of the ephemeral account is added
-  const { amount, memo, offrampingAccount } = sep24Result;
+  const { amount, memo, memoType, offrampingAccount } = sep24Result;
+
+  let transactionMemo;
+  switch (memoType) {
+    case "text":
+      transactionMemo = Memo.text(memo);
+      break;
+
+    case "hash":
+      transactionMemo = Memo.hash(Buffer.from(memo, "base64"));
+      break;
+
+    default:
+      throw new Error(`Unexpected offramp memo type: ${memoType}`);
+  }
+
   const transaction = new TransactionBuilder(ephemeralAccount, {
     fee: BASE_FEE,
     networkPassphrase: NETWORK_PASSPHRASE,
@@ -261,11 +307,11 @@ async function createOfframpTransaction(sep24Result, ephemeralAccount, ephemeral
     .addOperation(
       Operation.payment({
         amount,
-        asset: new Asset(ASSET_CODE, ASSET_ISSUER),
+        asset: new Asset(tokenConfig.assetCode, tokenConfig.assetIssuer),
         destination: offrampingAccount,
       })
     )
-    .addMemo(Memo.text(memo))
+    .addMemo(transactionMemo)
     .setTimeout(7 * 24 * 3600)
     .build();
   transaction.sign(ephemeralKeys);
@@ -273,7 +319,7 @@ async function createOfframpTransaction(sep24Result, ephemeralAccount, ephemeral
   return transaction;
 }
 
-async function createAccountMergeTransaction(fundingSecret, ephemeralAccount, ephemeralKeys) {
+async function createAccountMergeTransaction(fundingSecret, ephemeralAccount, ephemeralKeys, tokenConfig) {
   // this operation would run completely in the browser
   // that is where the signature of the ephemeral account is added
   const transaction = new TransactionBuilder(ephemeralAccount, {
@@ -282,7 +328,7 @@ async function createAccountMergeTransaction(fundingSecret, ephemeralAccount, ep
   })
     .addOperation(
       Operation.changeTrust({
-        asset: new Asset(ASSET_CODE, ASSET_ISSUER),
+        asset: new Asset(tokenConfig.assetCode, tokenConfig.assetIssuer),
         limit: "0",
       })
     )
