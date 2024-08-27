@@ -9,17 +9,11 @@ const HORIZON_URL = "https://horizon.stellar.org";
 const BASE_FEE = "1000000";
 
 const TOKEN_CONFIG = {
-  brl: {
-    tomlFileUrl: "https://ntokens.com/.well-known/stellar.toml",
-    assetCode: "BRL",
-    assetIssuer: "GDVKY2GU2DRXWTBEYJJWSFXIGBZV6AZNBVVSUHEPZI54LIS6BA7DVVSP",
-    vaultAccountId: "6g7fKQQZ9VfbBTQSaKBcATV4psApFra5EDwKLARFZCCVnSWS",
-  },
-  eurc: {
-    tomlFileUrl: "https://mykobo.co/.well-known/stellar.toml",
-    assetCode: "EURC",
-    assetIssuer: "GAQRF3UGHBT6JYQZ7YSUYCIYWAF4T2SAA5237Q5LIQYJOHHFAWDXZ7NM",
-    vaultAccountId: "6bsD97dS8ZyomMmp1DLCnCtx25oABtf19dypQKdZe6FBQXSm",
+  ars: {
+    tomlFileUrl: "https://api.anclap.com/.well-known/stellar.toml",
+    assetCode: "ARS",
+    assetIssuer: "GCYE7C77EB5AWAA25R5XMWNI2EDOKTTFTTPZKM2SR5DI4B4WFD52DARS",
+    vaultAccountId: "xxx",
   },
 };
 
@@ -36,26 +30,21 @@ async function getConfig() {
     process.exit(1);
   }
 
-  const stellarFundingSecret = await prompts.prompts.password({
+  const stellarSecret = await prompts.prompts.password({
     type: "password",
-    message: `Enter the secret key of the Stellar account that will fund the temporary account.`,
+    message: `Enter the secret key of the Stellar account that will transfer the amounts.`,
   });
 
-  const pendulumSecret = await prompts.prompts.password({
-    type: "password",
-    message: `Enter the secret seed for your Pendulum account: `,
-  });
 
   return {
-    pendulumSecret,
-    stellarFundingSecret,
+    stellarSecret,
     tokenConfig,
   };
 }
 
 async function main() {
   const config = await getConfig();
-  const { tokenConfig } = config;
+  const { tokenConfig, stellarSecret } = config;
 
   console.log("Fetch anchor information");
   const tomlFile = await fetch(tokenConfig.tomlFileUrl);
@@ -77,41 +66,41 @@ async function main() {
   const webAuthEndpoint = findValueInToml("WEB_AUTH_ENDPOINT");
   const sep24Url = findValueInToml("TRANSFER_SERVER_SEP0024");
 
-  const ephemeralKeys = Keypair.random();
-  console.log(`Ephemeral secret: ${ephemeralKeys.secret()}`);
+  const stellarKeys = Keypair.fromSecret(stellarSecret);
+  console.log(`Stellar account : ${stellarKeys.publicKey()}`);
 
-  const sep10Token = await sep10(ephemeralKeys, signingKey, webAuthEndpoint);
+  const sep10Token = await sep10(stellarKeys, signingKey, webAuthEndpoint);
   const sep24Result = await sep24(sep10Token, sep24Url, tokenConfig);
   console.log(`SEP-24 completed. Offramp details: ${JSON.stringify(sep24Result)}`);
 
   const horizonServer = new Horizon.Server(HORIZON_URL);
   await setupStellarAccount(config.stellarFundingSecret, ephemeralKeys, horizonServer, tokenConfig);
 
-  const ephemeralAccountId = ephemeralKeys.publicKey();
-  const ephemeralAccount = await horizonServer.loadAccount(ephemeralAccountId);
-  const offrampingTransaction = await createOfframpTransaction(
-    sep24Result,
-    ephemeralAccount,
-    ephemeralKeys,
-    tokenConfig
-  );
-  const mergeAccountTransaction = await createAccountMergeTransaction(
-    config.stellarFundingSecret,
-    ephemeralAccount,
-    ephemeralKeys,
-    tokenConfig
-  );
+  // const ephemeralAccountId = ephemeralKeys.publicKey();
+  // const ephemeralAccount = await horizonServer.loadAccount(ephemeralAccountId);
+  // const offrampingTransaction = await createOfframpTransaction(
+  //   sep24Result,
+  //   ephemeralAccount,
+  //   ephemeralKeys,
+  //   tokenConfig
+  // );
+  // const mergeAccountTransaction = await createAccountMergeTransaction(
+  //   config.stellarFundingSecret,
+  //   ephemeralAccount,
+  //   ephemeralKeys,
+  //   tokenConfig
+  // );
 
-  await finalize({
-    amountString: sep24Result.amount,
-    ephemeralAccountId,
-    fundingSecret: config.stellarFundingSecret,
-    horizonServer,
-    offrampingTransaction,
-    mergeAccountTransaction,
-    pendulumSecret: config.pendulumSecret,
-    tokenConfig,
-  });
+  // await finalize({
+  //   amountString: sep24Result.amount,
+  //   ephemeralAccountId,
+  //   fundingSecret: config.stellarFundingSecret,
+  //   horizonServer,
+  //   offrampingTransaction,
+  //   mergeAccountTransaction,
+  //   pendulumSecret: config.pendulumSecret,
+  //   tokenConfig,
+  // });
 
   process.exit();
 }
@@ -165,6 +154,8 @@ async function sep24(token, sep24Url, tokenConfig) {
 
   const sep24Params = new URLSearchParams({
     asset_code: tokenConfig.assetCode,
+    // asset_issuer: tokenConfig.assetIssuer,
+    // amount: "100",
   });
 
   const fetchUrl = `${sep24Url}/transactions/withdraw/interactive`;
@@ -176,6 +167,7 @@ async function sep24(token, sep24Url, tokenConfig) {
 
   const sep24Response = await fetch(fetchUrl, parameters);
   if (sep24Response.status !== 200) {
+    console.log(sep24Response);
     throw new Error(
       `Failed to initiate SEP-24: ${sep24Response.statusText}, ${fetchUrl}, ${JSON.stringify(parameters)}`
     );
