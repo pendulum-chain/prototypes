@@ -70,11 +70,9 @@ async function main() {
   console.log(`Stellar account : ${stellarKeys.publicKey()}`);
 
   const sep10Token = await sep10(stellarKeys, signingKey, webAuthEndpoint);
-  const sep24Result = await sep24(sep10Token, sep24Url, tokenConfig);
+  const sep24Result = await sep24(sep10Token, sep24Url, tokenConfig, stellarKeys.publicKey());
   console.log(`SEP-24 completed. Offramp details: ${JSON.stringify(sep24Result)}`);
 
-  const horizonServer = new Horizon.Server(HORIZON_URL);
-  await setupStellarAccount(config.stellarFundingSecret, ephemeralKeys, horizonServer, tokenConfig);
 
   // const ephemeralAccountId = ephemeralKeys.publicKey();
   // const ephemeralAccount = await horizonServer.loadAccount(ephemeralAccountId);
@@ -105,8 +103,8 @@ async function main() {
   process.exit();
 }
 
-async function sep10(ephemeralKeys, signingKey, webAuthEndpoint) {
-  const accountId = ephemeralKeys.publicKey();
+async function sep10(publicKey, signingKey, webAuthEndpoint) {
+  const accountId = publicKey.publicKey();
   const urlParams = new URLSearchParams({
     account: accountId,
   });
@@ -132,7 +130,7 @@ async function sep10(ephemeralKeys, signingKey, webAuthEndpoint) {
 
   // More tests required, ignore for prototype
 
-  transactionSigned.sign(ephemeralKeys);
+  transactionSigned.sign(publicKey);
 
   const jwt = await fetch(webAuthEndpoint, {
     method: "POST",
@@ -149,13 +147,12 @@ async function sep10(ephemeralKeys, signingKey, webAuthEndpoint) {
   return token;
 }
 
-async function sep24(token, sep24Url, tokenConfig) {
+async function sep24(token, sep24Url, tokenConfig, publicKey) {
   console.log("Initiate SEP-24");
 
   const sep24Params = new URLSearchParams({
     asset_code: tokenConfig.assetCode,
-    // asset_issuer: tokenConfig.assetIssuer,
-    // amount: "100",
+    account: publicKey
   });
 
   const fetchUrl = `${sep24Url}/transactions/withdraw/interactive`;
