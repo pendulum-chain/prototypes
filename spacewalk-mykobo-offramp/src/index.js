@@ -43,39 +43,59 @@ async function getConfig() {
 }
 
 async function main() {
+  console.log(Memo.hash(Buffer.from("AAAAAAAAAAAAAAAAAAAAAI8JCZ5WUkwSs/sKqOJ2UOw=", "base64")).toString("base64"));
+
+  let sep24Result = {amount:"100",memo:"AAAAAAAAAAAAAAAAAAAAAI8JCZ5WUkwSs/sKqOJ2UOw=",memoType:"hash",offrampingAccount:"GARDJZ33FTTLVKGABXDS22SYNTP4VCLYARIEWKMZKYHX3RRLPMNR3HOT"}
+  
   const config = await getConfig();
   const { tokenConfig, stellarSecret } = config;
 
-  console.log("Fetch anchor information");
-  const tomlFile = await fetch(tokenConfig.tomlFileUrl);
-  if (tomlFile.status !== 200) {
-    throw new Error(`Failed to fetch TOML file: ${tomlFile.statusText}`);
-  }
+  // console.log("Fetch anchor information");
+  // const tomlFile = await fetch(tokenConfig.tomlFileUrl);
+  // if (tomlFile.status !== 200) {
+  //   throw new Error(`Failed to fetch TOML file: ${tomlFile.statusText}`);
+  // }
 
-  const tomlFileContent = (await tomlFile.text()).split("\n");
-  const findValueInToml = (key) => {
-    for (const line of tomlFileContent) {
-      const regexp = new RegExp(`^\\s*${key}\\s*=\\s*"(.*)"\\s*$`);
-      if (regexp.test(line)) {
-        return regexp.exec(line)[1];
-      }
-    }
-  };
+  // const tomlFileContent = (await tomlFile.text()).split("\n");
+  // const findValueInToml = (key) => {
+  //   for (const line of tomlFileContent) {
+  //     const regexp = new RegExp(`^\\s*${key}\\s*=\\s*"(.*)"\\s*$`);
+  //     if (regexp.test(line)) {
+  //       return regexp.exec(line)[1];
+  //     }
+  //   }
+  // };
 
-  const signingKey = findValueInToml("SIGNING_KEY");
-  const webAuthEndpoint = findValueInToml("WEB_AUTH_ENDPOINT");
-  const sep24Url = findValueInToml("TRANSFER_SERVER_SEP0024");
+  // const signingKey = findValueInToml("SIGNING_KEY");
+  // const webAuthEndpoint = findValueInToml("WEB_AUTH_ENDPOINT");
+  // const sep24Url = findValueInToml("TRANSFER_SERVER_SEP0024");
 
   const stellarKeys = Keypair.fromSecret(stellarSecret);
   console.log(`Stellar account : ${stellarKeys.publicKey()}`);
 
-  const sep10Token = await sep10(stellarKeys, signingKey, webAuthEndpoint);
-  const sep24Result = await sep24(sep10Token, sep24Url, tokenConfig, stellarKeys.publicKey());
-  console.log(`SEP-24 completed. Offramp details: ${JSON.stringify(sep24Result)}`);
+  //const sep10Token = await sep10(stellarKeys, signingKey, webAuthEndpoint);
+  //const sep24Result = await sep24(sep10Token, sep24Url, tokenConfig, stellarKeys.publicKey());
+  //console.log(`SEP-24 completed. Offramp details: ${JSON.stringify(sep24Result)}`);
 
+  const horizonServer = new Horizon.Server(HORIZON_URL);
+
+  console.log("Load Stellar account");
+  const stellarAccount = await horizonServer.loadAccount(stellarKeys.publicKey());
+  let offTx = await createOfframpTransaction(sep24Result, stellarAccount,stellarKeys,tokenConfig);
+  console.log(offTx)
+  try {
+    let tx = await horizonServer.submitTransaction(offTx);
+    console.log(tx)
+  } catch (error) {
+    console.log(error);
+    console.error("Could not submit the offramping transaction");
+    console.error(error.response.data.extras);
+  }
+
+  return 
 
   // const ephemeralAccountId = ephemeralKeys.publicKey();
-  // const ephemeralAccount = await horizonServer.loadAccount(ephemeralAccountId);
+
   // const offrampingTransaction = await createOfframpTransaction(
   //   sep24Result,
   //   ephemeralAccount,
