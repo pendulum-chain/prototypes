@@ -1,5 +1,15 @@
-### Testing steps
 
+### How to: Ceate a new user
+
+- Run the service to cache webhook events. This must be registered through BRLA API.
+- Add the proper variables on `index.js`.
+- (optional: run `npm i`)
+- Run `node index.js` and fill the personal information prompted on the console.
+
+
+
+
+### BRLA API remarks
 
 Production api: https://api.brla.digital:5567
 
